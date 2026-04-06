@@ -84,9 +84,12 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(b"ok")
 
     def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"healthy")
+        try:
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"healthy")
+        except BrokenPipeError:
+            pass
 
     def log_message(self, format, *args):
         pass  # Suppress default access logs

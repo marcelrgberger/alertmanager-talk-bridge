@@ -9,7 +9,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_NAME: marcelrgberger/internal-docker-repo/alertmanager-talk-bridge
 
 jobs:
   build:
@@ -25,7 +25,7 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.DEPLOY_GITHUB_TOKEN }}
 
       - uses: docker/metadata-action@v5
         id: meta

@@ -56,7 +56,7 @@ docker run -d \
   -e TALK_USER=alertbot \
   -e TALK_PASSWORD=app-password \
   -p 8080:8080 \
-  ghcr.io/marcelrgberger/alertmanager-talk-bridge:latest
+  ghcr.io/marcelrgberger/internal-docker-repo/alertmanager-talk-bridge:latest
 ```
 
 ## Health check
