@@ -10,10 +10,11 @@ Webhook bridge that forwards Prometheus Alertmanager notifications to Nextcloud 
 
 `bridge.py` contains the entire application:
 - **Config**: Environment variables loaded at module level (`TALK_URL`, `TALK_TOKEN`, `TALK_USER`, `TALK_PASSWORD`, `PORT`)
-- **`format_alert()`**: Converts Alertmanager alert JSON → human-readable message with severity emojis
-- **`send_to_talk()`**: Posts formatted message to Nextcloud Talk OCS API
-- **`Handler`** (BaseHTTPRequestHandler): `POST /` receives Alertmanager webhook payload, `GET /` returns health check
-- No framework, no routing library — raw `HTTPServer`
+- **`build_message()`**: Bundles all alerts of one webhook payload into one human-readable message with severity emojis
+- **`send_to_talk()`**: Posts the message to the Nextcloud Talk OCS API and returns `DELIVERED`, `RETRY` (Talk 5xx/408/429, network error) or `FAILED` (other 4xx)
+- **`Handler`** (BaseHTTPRequestHandler): `POST /` answers `200` / `503` / `424` per outcome, so Alertmanager retries only what a retry can fix; `GET /` returns health check
+- No framework, no routing library — raw `ThreadingHTTPServer`
+- Log contract: `ok=False` is logged only for a lost message (platform-ops Cluster Watch greps for it); a retryable failure logs `deferred`
 
 ## Running Locally
 
@@ -41,7 +42,7 @@ GitHub Actions workflow (`.github/workflows/build.yaml`): builds Docker image an
 
 ## Key Details
 
-- No test suite exists yet
+- Tests: `python -m unittest discover -s tests -v` (fake Talk server, no extra dependencies); CI runs them before the image build
 - No linter/formatter configured
 - Single dependency: `requests>=2.31,<3`
 - Alertmanager webhook format: `{"alerts": [{"status": "firing|resolved", "labels": {...}, "annotations": {...}}]}`

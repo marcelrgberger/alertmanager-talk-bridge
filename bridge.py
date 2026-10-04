@@ -3,6 +3,11 @@
 Bundles all alerts from a webhook payload into a single Talk message so a burst
 of N alerts produces 1 notification instead of N. Uses ThreadingHTTPServer so
 the health endpoint is never blocked by an in-flight Talk POST.
+
+The webhook answer tells Alertmanager whether the message arrived. Alertmanager
+retries on 5xx (with backoff, for up to its group_interval) and treats 4xx as
+final, so the bridge answers 200 when Talk accepted the message, 503 when Talk
+failed in a way a retry can fix, and 424 when it cannot.
 """
 
 import json
@@ -90,7 +95,16 @@ def build_message(payload: dict) -> str:
     return "\n".join(sections).strip()
 
 
-def send_to_talk(message: str) -> bool:
+DELIVERED, RETRY, FAILED = "delivered", "retry", "failed"
+
+# Talk answers that a later attempt can fix: server errors, rate limiting, and
+# request timeouts. Every other 4xx (credentials, room token, message too large)
+# fails the same way on every attempt.
+RETRYABLE_STATUS = {408, 429}
+
+
+def send_to_talk(message: str) -> str:
+    """Post one message to Talk. Returns DELIVERED, RETRY or FAILED."""
     url = f"{TALK_URL}/ocs/v2.php/apps/spreed/api/v1/chat/{TALK_TOKEN}"
     try:
         resp = requests.post(
@@ -101,12 +115,20 @@ def send_to_talk(message: str) -> bool:
             timeout=10,
         )
     except requests.RequestException as exc:
-        log.error("Talk API request failed: %s", exc)
-        return False
-    if resp.status_code == 201:
-        return True
+        log.warning("Talk API request failed: %s", exc)
+        return RETRY
+    if 200 <= resp.status_code < 300:
+        return DELIVERED
+    if resp.status_code >= 500 or resp.status_code in RETRYABLE_STATUS:
+        log.warning("Talk API error %d: %s", resp.status_code, resp.text[:200])
+        return RETRY
     log.error("Talk API error %d: %s", resp.status_code, resp.text[:200])
-    return False
+    return FAILED
+
+
+# Webhook status per outcome. 503 makes Alertmanager retry; 424 is a 4xx, so
+# Alertmanager stops and counts the notification as failed.
+RESPONSE_STATUS = {DELIVERED: 200, RETRY: 503, FAILED: 424}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -125,15 +147,24 @@ class Handler(BaseHTTPRequestHandler):
         log.info("Received %d alert(s)", len(alerts))
 
         message = build_message(payload)
+        outcome = DELIVERED
         if message:
-            ok = send_to_talk(message)
-            log.info("Bundled %d alert(s) into 1 Talk message ok=%s", len(alerts), ok)
+            outcome = send_to_talk(message)
+            # "ok=False" means the message is lost; monitoring greps for it. A
+            # retryable failure is not lost yet — the sender will try again.
+            if outcome == DELIVERED:
+                log.info("Bundled %d alert(s) into 1 Talk message ok=True", len(alerts))
+            elif outcome == RETRY:
+                log.info("Bundled %d alert(s) into 1 Talk message deferred, answering 503 so the sender retries", len(alerts))
+            else:
+                log.error("Bundled %d alert(s) into 1 Talk message ok=False, answering 424, retrying cannot help", len(alerts))
         else:
             log.info("Empty payload, skipping")
 
-        self.send_response(200)
+        status = RESPONSE_STATUS[outcome]
+        self.send_response(status)
         self.end_headers()
-        self.wfile.write(b"ok")
+        self.wfile.write(b"ok" if status == 200 else outcome.encode())
 
     def do_GET(self):
         try:

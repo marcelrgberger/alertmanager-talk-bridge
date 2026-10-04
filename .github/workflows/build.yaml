@@ -13,7 +13,21 @@ env:
   IMAGE_NAME: marcelrgberger/internal-docker-repo/alertmanager-talk-bridge
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Run tests
+        run: |
+          set -euo pipefail
+          pip install -r requirements.txt
+          python -m unittest discover -s tests -v
+
   build:
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read
